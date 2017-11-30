@@ -21,7 +21,6 @@
 
 
 #define maxEvNum 200
-#define port 80
 #define SIZECHARS 2000000
 #define MAXBITS 16000000
 #define maxQueLen 400000     //队列最大长度
@@ -142,9 +141,9 @@ typedef struct{
 }Page;
 Page page[maxEvNum];
 
-FILE *fp[maxEvNum];
-FILE* logptr;
-struct timeval tv = {1,0};
+//FILE *fp[maxEvNum];
+//FILE* logptr;
+struct timeval tv = {2,0};
 struct event_base * base = NULL;
 struct bufferevent * bfevent[maxEvNum]={NULL};
 
@@ -152,14 +151,19 @@ struct bufferevent * bfevent[maxEvNum]={NULL};
 int filecnt=0;
 char filename[100];
 char filenamebuf[100];
-const char ipaddress[]="10.108.86.80";
+char ipaddress[16];
+//const char ipaddress[]="10.108.86.80";
 //10.108.86.80
 char CurrentUrl[300];
 char HTTPRequest[2000];
 char URLHost[1000];
 unsigned char *BloomFlag;
 struct sockaddr_in serveraddr;
+int PairBuf[10000][2];
+int PairBufLength;
 
+FILE *fURL,*fLink;
+char Buf[10000];
 
 int addEvent(int i);
 void urlDeal();
@@ -167,4 +171,5 @@ void read_callback(struct bufferevent * pBufEv, void * pArg);
 void event_callback(struct bufferevent * pBufEv, short events, void * pArg);
 void dealPage(int i);
 int sendRequest();
+int alreadyOutput(int a,int b);
 #endif

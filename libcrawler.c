@@ -258,19 +258,31 @@ int bloomfilter(char url[])
 }
 
 
-int URLsearch(char *CurrentPage)
+int URLsearch(char *CurrentPage,char *URLSearching)
 {
     int state;
     int i,j=0,n;
     int flag;
+    int URLSearching_Num=0;
     char CurrentChar;
     char URLBuf[1000];
     //char *SearchedURL;
     char URLhttp[21]="http://news.sohu.com";
 
-    //Start to analysis
+    //Start to analyze
     //FSM
+
+    while(URLSearching_Num<q.tail)
+    {
+        if(strcmp(URLSearching,q.urls[URLSearching_Num])==0)
+        {
+            break;
+        }
+        URLSearching_Num++;
+    }
+
     state=0;
+    PairBufLength=0;
     for(i=0;CurrentPage[i]!='\0';i++)
     {
         CurrentChar=CurrentPage[i];
@@ -426,6 +438,11 @@ int URLsearch(char *CurrentPage)
                        j=0;
                        break;
                    }
+                   else if(CurrentChar=='\n'||CurrentChar=='\r'||CurrentChar=='#')
+                   {
+                       state=9;
+                       break;
+                   }
                    else
                    {
                        state=8;
@@ -448,16 +465,60 @@ int URLsearch(char *CurrentPage)
                        if(flag==0)
                        {
                            urlPush(&q,URLBuf);
-                           state=0;
-                           j=0;
-                           //printf("searchedurl: %s\n",urlbuf);
+                           PairBuf[PairBufLength][0]=q.tail-1;
+                           PairBuf[PairBufLength][1]=URLSearching_Num;
+                           PairBufLength++;
+                           //output
+                           fprintf(fURL,"%s %d\n",URLBuf,q.tail-1);
+                           fprintf(fLink,"%d %d\n",q.tail-1,URLSearching_Num);
                        }
+                       else
+                       {
+                           int i=1;
+                           while(i<q.tail)
+                           {
+                               if(strcmp(URLBuf,q.urls[i])==0)
+                               {
+                                   if(alreadyOutput(i,URLSearching_Num)==1)
+                                   {
+                                       break;
+                                   }
+                                   else
+                                   {
+                                       PairBuf[PairBufLength][0]=i;
+                                       PairBuf[PairBufLength][1]=URLSearching_Num;
+                                       PairBufLength++;
+                                       //output
+                                       fprintf(fLink,"%d %d\n",i,URLSearching_Num);
+                                       break;
+                                   }
+                               }
+                               i++;
+                           }
+                       }
+                       state=0;
+                       j=0;
                    }
                    break;
         }
     }
 
     return 1;
+}
+
+int alreadyOutput(int a,int b)
+{
+    int i;
+
+    for(i=0;i<=PairBufLength;i++)
+    {
+        if(PairBuf[i][0]==a&&PairBuf[i][1]==b)  //搜索到已经输出过
+        {
+            return 1;
+        }
+    }
+
+    return 0;
 }
 
 int JudgeURL(char *url)
@@ -498,24 +559,31 @@ int ParseURL(char currenturl[])
 
 int main(int argc,char **argv)
 {
-    struct rlimit new_lim;
-    new_lim.rlim_max = RLIM_INFINITY;
-    new_lim.rlim_cur = RLIM_INFINITY;
-    if (setrlimit(RLIMIT_CORE, &new_lim) != 0)
+    //Open the output files
+    fURL=fopen(argv[3],"w");
+    if(fURL==NULL)
     {
-            printf("Core dump size set to unlimited failed.\n");
-
+        printf("URLs.txt open error!\n");
+        return 0;
     }
+    fLink=fopen("./Links.txt","w");
+    if(fLink==NULL)
+    {
+        printf("Links.txt open error!\n");
+        return 0;
+    }
+
+    //Initialize the Buf
+    for(int i=0;i<=999;i++)
+    {
+        PairBuf[i][0]=0;
+        PairBuf[i][1]=0;
+    }
+    PairBufLength=0;
 
     bzero(page,sizeof(page));
     bzero(&evQue,sizeof(evQue));
     memset(&q,0,sizeof(q));
-    //open the log file
-    if((logptr=fopen("log.txt","w"))==NULL)
-    {
-        perror("logfile open failed!\n");
-        exit(0);
-    }
 
     //Initialize the Bloom Filter
     BloomFlag=(unsigned char *)malloc(SIZECHARS);
@@ -528,9 +596,10 @@ int main(int argc,char **argv)
     }
 
     //init server
+    strcpy(ipaddress,argv[1]);
     memset(&serveraddr,0,sizeof(serveraddr));
     serveraddr.sin_family=AF_INET;
-    serveraddr.sin_port=htons(port);
+    serveraddr.sin_port=htons(atoi(argv[2]));
     serveraddr.sin_addr.s_addr=inet_addr(ipaddress);
 
     //创建事件驱动句柄
@@ -547,10 +616,39 @@ int main(int argc,char **argv)
     strcpy(CurrentUrl,"http://news.sohu.com");
     urlPush(&q,CurrentUrl);
 
+    fputs(CurrentUrl,fURL);
+    fputs(" ",fURL);
+    fprintf(fURL,"%d",q.tail-1);
+    fputs("\n",fURL);
+
     event_base_loop(base,EVLOOP_NO_EXIT_ON_EMPTY);
 
     event_base_free(base);
-    fclose(logptr);
+
+    fclose(fURL);
+    fclose(fLink);
+
+    //Reinput the file
+    fURL=fopen(argv[3],"a");
+    fLink=fopen("./Links.txt","r");
+    if(fURL==NULL)
+    {
+        printf("Reinput URLs.txt open error!\n");
+        return 0;
+    }
+    if(fLink==NULL)
+    {
+        printf("Reinput Links.txt open error!\n");
+        return 0;
+    }
+    fputs("\n",fURL);
+    while(fgets(Buf,10000,fLink)!=NULL)
+    {
+        fputs(Buf,fURL);
+    }
+    fclose(fURL);
+    fclose(fLink);
+
     printf("The program exit safely!\n");
 
     return 0;
@@ -577,8 +675,8 @@ int isCompleted(int i)
                 sscanf(Line,"%s %s",version,statusCode);
                 if(strcmp(statusCode,"200")!=0)
                 {
-                    printf("%s\n",statusCode);
-                    //page[i].headParsed=2;    //代表不用分析了
+                    //printf("%s\n",statusCode);
+
                     return 2;    //不符合要求，不再接收
                 }
                 break;
@@ -610,7 +708,7 @@ int isCompleted(int i)
                 {
                     sscanf(Line,"%s %d",name,&value);
                     page[i].contentLength=value;
-                    printf("%d\n",value);
+                    //printf("%d\n",value);
                 }
                 k=-1;
             }
@@ -640,7 +738,7 @@ void read_callback(struct bufferevent * pBufEv, void * pArg)
     strcat(page[i].data,buf);
 
 
-    //判断接收结束，但不一定准确
+    //判断接收结束
     int flag=isCompleted(i);
     if(flag==1)
     {
@@ -656,7 +754,7 @@ void read_callback(struct bufferevent * pBufEv, void * pArg)
     }
     else if(flag==2)
     {
-        fprintf(logptr,"Event %d 404 not found!\n",i);
+        //fprintf(logptr,"Event %d 404 not found!\n",i);
         //flush the bufferevent's buffer
         bzero(&page[i],sizeof(page[i]));
         //还回事件池
@@ -680,23 +778,21 @@ void event_callback(struct bufferevent * pBufEv, short events, void * pArg)
     if(events & BEV_EVENT_CONNECTED)
     {
         pushEv(&evQue,i);
-        fprintf(logptr,"event %d connected!\n",i);
+        //fprintf(logptr,"event %d connected!\n",i);
         if(!qEmpty(&q))
             sendRequest();
     }
     //socket disconnected
     else if(events & BEV_EVENT_EOF)
     {
-        printf("Event %d disconnected!\n",i);
+        //printf("Event %d disconnected!\n",i);
         if(evGetOut(&evQue,i)==0)
         {
             evNum--;
             bzero(&page[i],sizeof(page[i]));
             //urlPush(&q,pa->url);
-            fprintf(logptr,"Event %d disconnected and inread!\n",i);
+            //fprintf(logptr,"Event %d disconnected and inread!\n",i);
         }
-        else
-            fprintf(logptr,"Event %d disconnected!\n",i);
 
         if(evNum==0 && qEmpty(&q))
             event_base_loopbreak(base);
@@ -706,14 +802,14 @@ void event_callback(struct bufferevent * pBufEv, short events, void * pArg)
     //错误
     else if(events & BEV_EVENT_ERROR)
     {
-        fprintf(logptr,"event %d error!\n",i);   //log
+        //fprintf(logptr,"event %d error!\n",i);   //log
         bufferevent_free(pBufEv);
         addEvent(i);
     }
     //read_timeout
     else if(events & ( BEV_EVENT_TIMEOUT | BEV_EVENT_READING))
     {
-        fprintf(logptr,"event %d Timeout!\n",i);   //log
+        //fprintf(logptr,"event %d Timeout!\n",i);   //log
         printf("Queue length:%d evNum:%d  --Timeout\n",(q.tail+maxQueLen-q.head)%maxQueLen,evNum);
 
         if(evGetOut(&evQue,i)==0)
@@ -743,7 +839,7 @@ int addEvent(int i)
     if( bufferevent_socket_connect(bfevent[i], (struct sockaddr*)&serveraddr, sizeof(serveraddr)) < 0)
     {
         printf("connect error\n");
-        fprintf(logptr,"connect error\n");
+        //fprintf(logptr,"connect error\n");
         return 0;
     }
 
@@ -756,13 +852,13 @@ void dealPage(int i)
     filecnt++;
     filename[0]='\0';
     filenamebuf[0]='\0';
-    strcpy(filename,"/home/zhao/Desktop/crawler1/pages/");
+    strcpy(filename,"./Pages/");
     sprintf(filenamebuf,"%d",filecnt);
     strcat(filename,filenamebuf);
     strcat(filename,".txt");
 
     //Write the page into disk.
-    fp[i]=fopen(filename,"w");
+/*    fp[i]=fopen(filename,"w");
     if(fp[i]==NULL)
     {
         printf("Can't create file!\n");
@@ -774,12 +870,12 @@ void dealPage(int i)
     fputs("\n",fp[i]);
     fputs(page[i].data,fp[i]);
     fclose(fp[i]);
-
+*/
     //Analysis the page just crawled.
-    URLsearch(page[i].data);
+    URLsearch(page[i].data,para[i].url);
 
     printf("Queue length:%d evNum:%d\n",(q.tail+maxQueLen-q.head)%maxQueLen,evNum);                           //log
-    fprintf(logptr,"Queue length:%d     evNum:%d   evQueLen:%d Event:%d \n",(q.tail+maxQueLen-q.head)%maxQueLen,evNum,(evQue.tail+maxEvNum+1-evQue.head)%(maxEvNum+1),i);    //log
+    //fprintf(logptr,"Queue length:%d     evNum:%d   evQueLen:%d Event:%d \n",(q.tail+maxQueLen-q.head)%maxQueLen,evNum,(evQue.tail+maxEvNum+1-evQue.head)%(maxEvNum+1),i);    //log
 
     return ;
 }
